@@ -103,13 +103,13 @@ int main(int argc, char **argv)
         switch (c) {
         case 'h':             /* print help message */
             usage();
-	    break;
+		break;
         case 'v':             /* emit additional diagnostic info */
             verbose = 1;
-	    break;
+		break;
         case 'p':             /* don't print a prompt */
             emit_prompt = 0;  /* handy for automatic testing */
-	    break;
+		break;
 	default:
             usage();
 	}
@@ -133,14 +133,14 @@ int main(int argc, char **argv)
 
 	/* Read command line */
 	if (emit_prompt) {
-	    printf("%s", prompt);
-	    fflush(stdout);
+		printf("%s", prompt);
+		fflush(stdout);
 	}
 	if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
-	    app_error("fgets error");
+		app_error("fgets error");
 	if (feof(stdin)) { /* End of file (ctrl-d) */
-	    fflush(stdout);
-	    exit(0);
+		fflush(stdout);
+		exit(0);
 	}
 	/* Evaluate the command line */
 	eval(cmdline);
@@ -164,30 +164,42 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-  	char *argv[MAXARGS];
-	pid_t pid;
-	int bg = parseline(cmdline, argv);
-	
-	int is_builtin_cmd = builtin_cmd(argv);
+    char *argv[MAXARGS];
+    pid_t pid;
+    int bg = parseline(cmdline, argv);
+    struct job_t *job;
 
-	if(!is_builtin_cmd) {
-		pid = fork();
-		if (pid == 0) {
-			int execv_status = execv(argv[0], argv);
-			if(execv_status < 0) {
-				printf("%s: Command not found.\n", argv[0]);
-                exit(1);
-			}
-		}
+    if (argv[0] == NULL) {
+        return;
+    }
 
-		if(!bg) {
-			waitfg(pid);
-		} else {
-			addjob(jobs, pid, bg ? BG : FG, cmdline);
-			printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
-		}
-	}
-	return;
+    if (!builtin_cmd(argv)) {
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &mask, NULL);
+
+        if ((pid = fork()) == 0) {
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            setpgid(0, 0);
+
+            if (execve(argv[0], argv, environ) < 0) {
+                printf("%s: Command not found.\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        int state = bg ? BG : FG;
+        addjob(jobs, pid, state, cmdline);
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+
+        if (!bg) {
+            waitfg(pid);
+        } else {
+            job = getjobpid(jobs, pid);
+            printf("[%d] (%d) %s", job->jid, job->pid, cmdline);
+        }
+    }
 }
 
 /* 
@@ -253,23 +265,16 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-	if(!strcmp("quit", argv[0])){
-		exit(0);
-	}
-	
-	if(!strcmp(argv[0], "jobs")){
-		listjobs(jobs);
-		return 1;
-	} 
-	
-	// else if(!strcmp(argv[0], "bg") || strcmp(argv[0], "fg")) {
-		// do_bgfg(argv);
-		// return 1;
-	// } else if(!strcmp("&", argv[0])) {
-		// return 1;
-	// }
-	
-    return 0;     /* not a builtin command */
+    if (!strcmp(argv[0], "quit")) {
+        exit(0);
+    } else if (!strcmp(argv[0], "jobs")) {
+        listjobs(jobs);
+        return 1;
+    } else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")) {
+        do_bgfg(argv);
+        return 1;
+    }
+    return 0;
 }
 
 /* 
@@ -277,15 +282,41 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
-	// struct job_t *jobp = NULL;
-	// int jid;
+    struct job_t *job = NULL;
 
-	// if(argv[1] == NULL) {
-	// 	printf("%s commmand requires PID or %%jobid argument\n", argv[0]);
-	// 	return;
-	// }
+    if (argv[1] == NULL) {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
 
-    // return;
+    if (argv[1][0] == '%') {
+        int jid = atoi(&argv[1][1]);
+        job = getjobjid(jobs, jid);
+        if (job == NULL) {
+            printf("%s: No such job\n", argv[1]);
+            return;
+        }
+    } else if (isdigit(argv[1][0])) {
+        pid_t pid = atoi(argv[1]);
+        job = getjobpid(jobs, pid);
+        if (job == NULL) {
+            printf("(%d): No such process\n", pid);
+            return;
+        }
+    } else {
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+
+    if (!strcmp(argv[0], "bg")) {
+        job->state = BG;
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+        kill(-job->pid, SIGCONT);
+    } else if (!strcmp(argv[0], "fg")) {
+        job->state = FG;
+        kill(-job->pid, SIGCONT);
+        waitfg(job->pid);
+    }
 }
 
 /* 
@@ -293,21 +324,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-	// struct job_t* job;
-	// job = getjobpid(jobs, pid);
-	
-	// if(pid == 0) {
-	// 	return ;
-	// }
-
-	// if(job != NULL) {
-	// 	while(pid == fgpid(jobs)) {
-	// 	}
-	// }
-    // return;
-	int status;
-	waitpid(pid, &status, WUNTRACED);
-	return;
+    while (pid == fgpid(jobs)) {
+        sleep(1);
+    }
 }
 
 /*****************
@@ -323,23 +342,23 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-	// int status;
-	// pid_t pid;
+    pid_t pid;
+    int status;
 
-	// while((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0) {
-	// 	if(WIFSTOPPED(status)) {
-	// 		getjobpid(jobs, pid)->state = ST;
-	// 		int jid = pid2jid(pid);
-	// 		printf("Job [%d] (%d) Stopped by signal %d\n", jid, pid, WSTOPSIG(status));
-	// 	} else if(WIFSIGNALED(status)) {
-	// 		int jid = pid2jid(pid);
-	// 		printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
-	// 		deletejob(jobs, pid);
-	// 	} else if(WIFEXITED(status)) {
-	// 		deletejob(jobs, pid);
-	// 	}
-	// }
-    // return;
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
+        if (WIFSTOPPED(status)) {
+            struct job_t *job = getjobpid(jobs, pid);
+            if (job != NULL) {
+                job->state = ST;
+                printf("Job [%d] (%d) stopped by signal %d\n", job->jid, pid, WSTOPSIG(status));
+            }
+        } else if (WIFSIGNALED(status)) {
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        } else if (WIFEXITED(status)) {
+            deletejob(jobs, pid);
+        }
+    }
 }
 
 /* 
@@ -349,15 +368,10 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-	// pid_t pid = fgpid(jobs);
-	// if(pid != 0) {
-	// 	kill(-pid, sig);
-	
-	// 	if(sig > 0) {
-	// 		deletejob(jobs, pid);
-	// 	}
-	// }
-    // return;
+    pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+        kill(-pid, SIGINT);
+    }
 }
 
 /*
@@ -367,11 +381,10 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-	// pid_t pid = fgpid(jobs);
-	// if(pid != 0) {
-	// 	kill(-pid, sig);
-	// }
-    // return;
+    pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+        kill(-pid, SIGTSTP);
+    }
 }
 
 /*********************
