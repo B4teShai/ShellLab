@@ -150,7 +150,7 @@ int main(int argc, char **argv)
 
     exit(0); /* control never reaches here */
 }
-  
+
 /* 
  * eval - Evaluate the command line that the user has just typed in
  * 
@@ -165,16 +165,28 @@ int main(int argc, char **argv)
 void eval(char *cmdline) 
 {
   	char *argv[MAXARGS];
+	pid_t pid;
 	int bg = parseline(cmdline, argv);
 	
-	pid_t pid;
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGCHLD);
-	
-	if(argv[0] == NULL)
-		return;
+	int is_builtin_cmd = builtin_cmd(argv);
 
+	if(!is_builtin_cmd) {
+		pid = fork();
+		if (pid == 0) {
+			int execv_status = execv(argv[0], argv);
+			if(execv_status < 0) {
+				printf("%s: Command not found.\n", argv[0]);
+                exit(1);
+			}
+		}
+
+		if(!bg) {
+			waitfg(pid);
+		} else {
+			addjob(jobs, pid, bg ? BG : FG, cmdline);
+			printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+		}
+	}
 	return;
 }
 
@@ -213,14 +225,14 @@ int parseline(const char *cmdline, char **argv)
 	*delim = '\0';
 	buf = delim + 1;
 	while (*buf && (*buf == ' ')) /* ignore spaces */
-	       buf++;
+		buf++;
 
 	if (*buf == '\'') {
-	    buf++;
-	    delim = strchr(buf, '\'');
+		buf++;
+		delim = strchr(buf, '\'');
 	}
 	else {
-	    delim = strchr(buf, ' ');
+		delim = strchr(buf, ' ');
 	}
     }
     argv[argc] = NULL;
@@ -243,17 +255,21 @@ int builtin_cmd(char **argv)
 {
 	if(!strcmp("quit", argv[0])){
 		exit(0);
-	} else if(!strcmp(argv[0], "jobs")){
-		listjobs(jobs);
-		return 1;
-	} else if(!strcmp(argv[0], "bg") || strcmp(argv[0], "fg")) {
-		do_bgfg(argv);
-		return 1;
-	} else if(!strcmp("&", argv[0])) {
-		return 1;
 	}
 	
-    	return 0;     /* not a builtin command */
+	if(!strcmp(argv[0], "jobs")){
+		listjobs(jobs);
+		return 1;
+	} 
+	
+	// else if(!strcmp(argv[0], "bg") || strcmp(argv[0], "fg")) {
+		// do_bgfg(argv);
+		// return 1;
+	// } else if(!strcmp("&", argv[0])) {
+		// return 1;
+	// }
+	
+    return 0;     /* not a builtin command */
 }
 
 /* 
@@ -261,8 +277,15 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
-	
-    return;
+	// struct job_t *jobp = NULL;
+	// int jid;
+
+	// if(argv[1] == NULL) {
+	// 	printf("%s commmand requires PID or %%jobid argument\n", argv[0]);
+	// 	return;
+	// }
+
+    // return;
 }
 
 /* 
@@ -270,18 +293,21 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-	struct job_t* job;
-	job = getjobpid(jobs, pid);
+	// struct job_t* job;
+	// job = getjobpid(jobs, pid);
 	
-	if(pid == 0) {
-		return ;
-	}
+	// if(pid == 0) {
+	// 	return ;
+	// }
 
-	if(job != NULL) {
-		while(pid == fgpid(jobs)) {
-		}
-	}
-    	return;
+	// if(job != NULL) {
+	// 	while(pid == fgpid(jobs)) {
+	// 	}
+	// }
+    // return;
+	int status;
+	waitpid(pid, &status, WUNTRACED);
+	return;
 }
 
 /*****************
@@ -297,23 +323,23 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-	int status;
-	pid_t pid;
+	// int status;
+	// pid_t pid;
 
-	while((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0) {
-		if(WIFSTOPPED(status)) {
-			getjobpid(jobs, pid)->state = ST;
-			int jid = pid2jid(pid);
-			printf("Job [%d] (%d) Stopped by signal %d\n", jid, pid, WSTOPSIG(status));
-		} else if(WIFSIGNALED(status)) {
-			int jid = pid2jid(pid);
-			printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
-			deletejob(jobs, pid);
-		} else if(WIFEXITED(status)) {
-			deletejob(jobs, pid);
-		}
-	}
-    	return;
+	// while((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0) {
+	// 	if(WIFSTOPPED(status)) {
+	// 		getjobpid(jobs, pid)->state = ST;
+	// 		int jid = pid2jid(pid);
+	// 		printf("Job [%d] (%d) Stopped by signal %d\n", jid, pid, WSTOPSIG(status));
+	// 	} else if(WIFSIGNALED(status)) {
+	// 		int jid = pid2jid(pid);
+	// 		printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
+	// 		deletejob(jobs, pid);
+	// 	} else if(WIFEXITED(status)) {
+	// 		deletejob(jobs, pid);
+	// 	}
+	// }
+    // return;
 }
 
 /* 
@@ -323,15 +349,15 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-	pid_t pid = fgpid(jobs);
-	if(pid != 0) {
-		kill(-pid, sig);
+	// pid_t pid = fgpid(jobs);
+	// if(pid != 0) {
+	// 	kill(-pid, sig);
 	
-		if(sig > 0) {
-			deletejob(jobs, pid);
-		}
-	}
-    	return;
+	// 	if(sig > 0) {
+	// 		deletejob(jobs, pid);
+	// 	}
+	// }
+    // return;
 }
 
 /*
@@ -341,11 +367,11 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-	pid_t pid = fgpid(jobs);
-	if(pid != 0) {
-		kill(-pid, sig);
-	}
-    	return;
+	// pid_t pid = fgpid(jobs);
+	// if(pid != 0) {
+	// 	kill(-pid, sig);
+	// }
+    // return;
 }
 
 /*********************
