@@ -142,7 +142,6 @@ int main(int argc, char **argv)
 	    fflush(stdout);
 	    exit(0);
 	}
-
 	/* Evaluate the command line */
 	eval(cmdline);
 	fflush(stdout);
@@ -165,7 +164,18 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
-    return;
+  	char *argv[MAXARGS];
+	int bg = parseline(cmdline, argv);
+	
+	pid_t pid;
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGCHLD);
+	
+	if(argv[0] == NULL)
+		return;
+
+	return;
 }
 
 /* 
@@ -231,7 +241,19 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    return 0;     /* not a builtin command */
+	if(!strcmp("quit", argv[0])){
+		exit(0);
+	} else if(!strcmp(argv[0], "jobs")){
+		listjobs(jobs);
+		return 1;
+	} else if(!strcmp(argv[0], "bg") || strcmp(argv[0], "fg")) {
+		do_bgfg(argv);
+		return 1;
+	} else if(!strcmp("&", argv[0])) {
+		return 1;
+	}
+	
+    	return 0;     /* not a builtin command */
 }
 
 /* 
@@ -239,6 +261,7 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+	
     return;
 }
 
@@ -247,7 +270,18 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    return;
+	struct job_t* job;
+	job = getjobpid(jobs, pid);
+	
+	if(pid == 0) {
+		return ;
+	}
+
+	if(job != NULL) {
+		while(pid == fgpid(jobs)) {
+		}
+	}
+    	return;
 }
 
 /*****************
@@ -263,7 +297,23 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    return;
+	int status;
+	pid_t pid;
+
+	while((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0) {
+		if(WIFSTOPPED(status)) {
+			getjobpid(jobs, pid)->state = ST;
+			int jid = pid2jid(pid);
+			printf("Job [%d] (%d) Stopped by signal %d\n", jid, pid, WSTOPSIG(status));
+		} else if(WIFSIGNALED(status)) {
+			int jid = pid2jid(pid);
+			printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
+			deletejob(jobs, pid);
+		} else if(WIFEXITED(status)) {
+			deletejob(jobs, pid);
+		}
+	}
+    	return;
 }
 
 /* 
@@ -273,7 +323,15 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-    return;
+	pid_t pid = fgpid(jobs);
+	if(pid != 0) {
+		kill(-pid, sig);
+	
+		if(sig > 0) {
+			deletejob(jobs, pid);
+		}
+	}
+    	return;
 }
 
 /*
@@ -283,7 +341,11 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-    return;
+	pid_t pid = fgpid(jobs);
+	if(pid != 0) {
+		kill(-pid, sig);
+	}
+    	return;
 }
 
 /*********************
