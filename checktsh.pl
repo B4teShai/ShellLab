@@ -441,7 +441,7 @@ else {
 			"trace04.txt", "trace05.txt", "trace06.txt", 
 			"trace07.txt", "trace08.txt", "trace09.txt", 
 			"trace10.txt", "trace11.txt", "trace12.txt", 
-			"trace13.txt", "trace15.txt",
+			"trace13.txt", "trace14.txt", "trace15.txt",
 			"trace16.txt") {
 	check_trace($tracefile);
     }
